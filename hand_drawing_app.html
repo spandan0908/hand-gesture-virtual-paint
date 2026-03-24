@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Tracking & Object Detection Canvas</title>
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- TensorFlow.js & COCO-SSD for Object Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --glass-bg: rgba(20, 20, 30, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.15);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            color: #fff;
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        #videoElement {
+            display: none; 
+        }
+
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        /* Glassmorphism UI */
+        .ui-panel {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            z-index: 10;
+            background: var(--glass-bg);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid var(--glass-border);
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            width: 320px;
+            pointer-events: auto;
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00f2fe, #4facfe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p {
+            margin: 0 0 16px 0;
+            font-size: 0.85rem;
+            color: #d1d5db;
+            line-height: 1.5;
+        }
+
+        .instruction-box {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 20px;
+        }
+
+        .instruction-box ul {
+            margin: 0;
+            padding-left: 20px;
+            font-size: 0.85rem;
+            color: #a78bfa;
+        }
+        .instruction-box li { margin-bottom: 6px; }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #f59e0b;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+
+        .status-dot.active {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+
+        .color-picker-wrapper {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid rgba(255,255,255,0.3);
+            cursor: pointer;
+        }
+
+        input[type="color"] {
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            width: 60px;
+            height: 60px;
+            cursor: pointer;
+            border: none;
+            outline: none;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="outputCanvas"></canvas>
+
+    <div class="ui-panel">
+        <h1>Smart Air Canvas</h1>
+        
+        <div class="instruction-box">
+            <ul>
+                <li><strong>Draw:</strong> Raise ONLY your Index Finger.</li>
+                <li><strong>Clear Screen:</strong> Open palm & Slide left/right quickly.</li>
+                <li><strong>Detect Objects:</strong> Show any object to the camera to measure its size.</li>
+            </ul>
+        </div>
+        
+        <div class="status">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Initializing Systems...</span>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <span>Brush Color</span>
+                <div class="color-picker-wrapper" title="Choose color">
+                    <input type="color" id="brushColor" value="#ff007f">
+                </div>
+            </div>
+            <div class="control-group">
+                <span>Brush Size</span>
+                <input type="range" id="brushSize" min="2" max="30" value="8" style="width: 120px;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('outputCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const colorPicker = document.getElementById('brushColor');
+        const brushSizeSlider = document.getElementById('brushSize');
+
+        // State
+        let drawingPaths = [];
+        let currentPath = null;
+        let isDrawing = false;
+        
+        // Palm Sliding State
+        let prevPalmX = null;
+        let slideCooldown = 0;
+
+        // Object Detection State
+        let objectModel = null;
+        let detectedObjects = [];
+
+        // Window resizing
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function clearCanvas() {
+            drawingPaths = [];
+            
+            // Visual feedback for clear
+            canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+        }
+
+        // 1. Initialize Object Detection Model
+        cocoSsd.load().then(model => {
+            objectModel = model;
+            statusText.innerText = "AI Models Loaded.";
+            statusDot.classList.add('active');
+            setInterval(detectObjects, 500); // Run detection twice a second
+        });
+
+        async function detectObjects() {
+            if (objectModel && videoElement.readyState >= 2) {
+                const predictions = await objectModel.detect(videoElement);
+                // Filter out 'person' if we only want objects, or just show everything
+                detectedObjects = predictions.filter(p => p.class !== 'person');
+            }
+        }
+
+        // 2. Initialize MediaPipe Hands
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        hands.onResults(onResults);
+
+        // 3. Setup Camera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start().catch(err => {
+            statusText.innerText = "Camera access denied.";
+            statusDot.style.background = "#ef4444";
+        });
+
+        // 4. Main Loop
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Compute scaling (object-fit: cover)
+            let vRatio = results.image.width / results.image.height;
+            let cRatio = canvasElement.width / canvasElement.height;
+            let drawWidth, drawHeight, offsetX, offsetY;
+
+            if (vRatio > cRatio) {
+                drawHeight = canvasElement.height;
+                drawWidth = drawHeight * vRatio;
+                offsetX = -(drawWidth - canvasElement.width) / 2;
+                offsetY = 0;
+            } else {
+                drawWidth = canvasElement.width;
+                drawHeight = drawWidth / vRatio;
+                offsetX = 0;
+                offsetY = -(drawHeight - canvasElement.height) / 2;
+            }
+            let scaleRatioX = drawWidth / results.image.width;
+            let scaleRatioY = drawHeight / results.image.height;
+
+            // Draw mirrored camera feed
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.drawImage(results.image, offsetX, offsetY, drawWidth, drawHeight);
+            canvasCtx.restore(); 
+
+            let pointerX = null;
+            let pointerY = null;
+
+            // -- Gestures --
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Finger tip indices and PIP joint indices
+                const INDEX_TIP = 8; const INDEX_PIP = 6;
+                const MIDDLE_TIP = 12; const MIDDLE_PIP = 10;
+                const RING_TIP = 16; const RING_PIP = 14;
+                const PINKY_TIP = 20; const PINKY_PIP = 18;
+
+                // Check if fingers are up (y is inverted, lower value = higher on screen)
+                const isIndexUp = landmarks[INDEX_TIP].y < landmarks[INDEX_PIP].y;
+                const isMiddleUp = landmarks[MIDDLE_TIP].y < landmarks[MIDDLE_PIP].y;
+                const isRingUp = landmarks[RING_TIP].y < landmarks[RING_PIP].y;
+                const isPinkyUp = landmarks[PINKY_TIP].y < landmarks[PINKY_PIP].y;
+
+                // Map coordinates
+                pointerX = canvasElement.width - (offsetX + landmarks[INDEX_TIP].x * drawWidth);
+                pointerY = offsetY + landmarks[INDEX_TIP].y * drawHeight;
+
+                const palmCenterX = canvasElement.width - (offsetX + landmarks[9].x * drawWidth);
+
+                // GESTURE 1: Palm Sliding (Clear Canvas)
+                const isPalmOpen = isIndexUp && isMiddleUp && isRingUp && isPinkyUp;
+                
+                if (slideCooldown > 0) slideCooldown--;
+
+                if (isPalmOpen) {
+                    if (prevPalmX !== null && slideCooldown === 0) {
+                        const speed = Math.abs(palmCenterX - prevPalmX);
+                        if (speed > 80) { // Fast slide
+                            clearCanvas();
+                            slideCooldown = 30; // 30 frames cooldown
+                        }
+                    }
+                    prevPalmX = palmCenterX;
+                    isDrawing = false;
+                    currentPath = null;
+                } else {
+                    prevPalmX = null;
+
+                    // GESTURE 2: Index Drawing (Only Index is up)
+                    const onlyIndexUp = isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp;
+
+                    if (onlyIndexUp) {
+                        if (!isDrawing) {
+                            isDrawing = true;
+                            currentPath = { 
+                                color: colorPicker.value, 
+                                size: parseInt(brushSizeSlider.value),
+                                points: [] 
+                            };
+                            drawingPaths.push(currentPath);
+                        }
+                        if (currentPath) {
+                            currentPath.points.push({x: pointerX, y: pointerY});
+                        }
+                    } else {
+                        // Hover or closed fist
+                        isDrawing = false;
+                        currentPath = null;
+                    }
+                }
+            } else {
+                isDrawing = false;
+                currentPath = null;
+                prevPalmX = null;
+            }
+
+            // Render Drawings
+            for (let path of drawingPaths) {
+                if (path.points.length === 0) continue;
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(path.points[0].x, path.points[0].y);
+                for (let i = 1; i < path.points.length; i++) {
+                    canvasCtx.lineTo(path.points[i].x, path.points[i].y);
+                }
+                canvasCtx.lineCap = "round";
+                canvasCtx.lineJoin = "round";
+                canvasCtx.strokeStyle = path.color;
+                canvasCtx.lineWidth = path.size;
+                canvasCtx.shadowColor = path.color;
+                canvasCtx.shadowBlur = Math.max(2, path.size / 2);
+                canvasCtx.stroke();
+                canvasCtx.shadowBlur = 0; 
+            }
+
+            // Render Object Detection Boxes
+            canvasCtx.font = "16px Inter";
+            canvasCtx.textBaseline = "top";
+            
+            detectedObjects.forEach(obj => {
+                // Object bbox from TFJS: [x, y, width, height] relative to original image
+                let objX = offsetX + obj.bbox[0] * scaleRatioX;
+                let objY = offsetY + obj.bbox[1] * scaleRatioY;
+                let objW = obj.bbox[2] * scaleRatioX;
+                let objH = obj.bbox[3] * scaleRatioY;
+
+                // Adjust for mirrored screen: 
+                // X from left of screen = canvas width - (mirrored X + width)
+                let screenX = canvasElement.width - (objX + objW);
+
+                // Draw bounding box
+                canvasCtx.strokeStyle = "#10b981"; // Green
+                canvasCtx.lineWidth = 3;
+                canvasCtx.strokeRect(screenX, objY, objW, objH);
+
+                // Box Area / "Take a size" logic mapping
+                let apparentSize = Math.round(obj.bbox[2] * obj.bbox[3] / 100);
+
+                // Background label
+                const label = `${obj.class.toUpperCase()} - Size: ${Math.round(objW)}x${Math.round(objH)}px`;
+                const textWidth = canvasCtx.measureText(label).width;
+                
+                canvasCtx.fillStyle = "#10b981";
+                canvasCtx.fillRect(screenX, objY - 25, textWidth + 10, 25);
+                
+                // Text
+                canvasCtx.fillStyle = "#000";
+                canvasCtx.fillText(label, screenX + 5, objY - 20);
+            });
+
+            // Render Pointer Feedback
+            if (pointerX !== null && pointerY !== null) {
+                canvasCtx.beginPath();
+                canvasCtx.arc(pointerX, pointerY, isDrawing ? parseInt(brushSizeSlider.value) / 2 : 8, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = isDrawing ? colorPicker.value : "rgba(255, 255, 255, 0.5)";
+                canvasCtx.fill();
+                
+                if (!isDrawing) {
+                    canvasCtx.strokeStyle = "white";
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.stroke();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
