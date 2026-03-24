@@ -44,8 +44,8 @@ hand_drawing_app.html
 * Computer vision learning project
 
 ## 📸 Demo
+<img width="1920" height="853" alt="Screenshot (867)" src="https://github.com/user-attachments/assets/e1d106d2-1ea8-4961-8951-a26bc74a6ede" />
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/0f1ff30b-9fb3-4e5b-8911-b7be9079904c" />
 
 ## 📚 Learning Outcome
 
