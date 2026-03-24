@@ -19,36 +19,28 @@ This project is a real-time hand gesture-based drawing system that allows users 
 
 ## ▶️ How to Run
 
-1. Install dependencies (for Python version):
+### Option 1 (Python Version)
 
-```
 pip install opencv-python mediapipe numpy
-```
-
-2. Run:
-
-```
 python main.py
-```
 
-OR open:
+### Option 2 (Web Version)
 
-```
-hand_drawing_app.html
-```
+Open `index.html` in browser
 
 ## 🎯 Use Cases
 
 * Touchless drawing system
-* Gesture-based UI interaction
-* Computer vision learning project
+* Gesture-based UI
+* Computer vision learning
 
 ## 📸 Demo
-<img width="1920" height="853" alt="Screenshot (867)" src="https://github.com/user-attachments/assets/e1d106d2-1ea8-4961-8951-a26bc74a6ede" />
+
+<img width="1920" height="853" alt="Screenshot (867)" src="https://github.com/user-attachments/assets/cbb5889b-9135-42b6-b264-aa744803ba53" />
 
 
 ## 📚 Learning Outcome
 
 * Learned hand tracking
 * Implemented gesture recognition
-* Built real-time CV application
+* Built real-time CV system
